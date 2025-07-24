@@ -4,6 +4,7 @@ pragma solidity ^0.8.30;
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "./VotingToken.sol";
 
+
 contract PollManager is Ownable {
     struct Poll {
         uint256 id;
@@ -28,6 +29,11 @@ contract PollManager is Ownable {
 
     VotingToken public votingToken;
 
+    // Events
+    event PollCreated(uint indexed pollId, string title, uint256 deadline);
+    event TokenMinted(uint indexed pollId, address indexed user, uint256 amount);
+    event VoteCast(uint indexed pollId, address indexed voter, string choice);
+
     constructor() Ownable(msg.sender) {
         // VotingToken will be set after deployment
     }
@@ -50,6 +56,8 @@ contract PollManager is Ownable {
             deadline: block.timestamp + _duration
         });
         polls.push(newPoll);
+        
+        emit PollCreated(polls.length - 1, _title, block.timestamp + _duration);
     }
 
     function mintTokenForPoll(uint pollId) public {
@@ -59,6 +67,8 @@ contract PollManager is Ownable {
         
         hasMintedForPoll[pollId][msg.sender] = true;
         votingToken.mint(msg.sender, 1 * 10**18); // 1 VT token
+        
+        emit TokenMinted(pollId, msg.sender, 1 * 10**18);
     }
 
     function vote(uint pollId, string memory choice) public {
@@ -81,11 +91,14 @@ contract PollManager is Ownable {
 
         hasVoted[pollId][msg.sender] = true;
         voteCounts[pollId][choice] += 1;
+        
+        emit VoteCast(pollId, msg.sender, choice);
+        votingToken.burnFrom(msg.sender, 1 * 10**18);
     }
 
     function mintAndVote(uint pollId, string memory choice) public {
-        // First mint token if user hasn't minted for this poll
-        if (!hasMintedForPoll[pollId][msg.sender] && votingToken.balanceOf(msg.sender) == 0) {
+        // Mint if user hasn't minted for this specific poll
+        if (!hasMintedForPoll[pollId][msg.sender]) {
             mintTokenForPoll(pollId);
         }
         
@@ -95,5 +108,58 @@ contract PollManager is Ownable {
 
     function getTotalPolls() public view returns (uint) {
         return polls.length;
+    }
+
+    function getWinnerOption(uint pollId) public view returns (string memory winnerOption) {
+        require(pollId < polls.length, "Poll does not exist");
+        Poll storage poll = polls[pollId];
+        require(poll.options.length > 0, "Poll has no options");
+        
+        uint maxVotes = 0;
+        uint winnerIndex = 0;
+        for (uint i = 0; i < poll.options.length; i++) {
+            uint count = voteCounts[pollId][poll.options[i]];
+            if (count > maxVotes) {
+                maxVotes = count;
+                winnerIndex = i;
+            }
+        }
+        winnerOption = poll.options[winnerIndex];
+        // Note: In case of tie votes, returns the first option with maximum votes
+    }
+
+    function pollDetails(uint pollId) public view returns (
+        string memory title,
+        string[] memory options,
+        uint256 deadline
+    ) {
+        require(pollId < polls.length, "Poll does not exist");
+        Poll storage poll = polls[pollId];
+        return (poll.title, poll.options, poll.deadline);
+    }
+
+    function pollResults(uint pollId) public view returns (uint[] memory) {
+        require(pollId < polls.length, "Poll does not exist");
+        Poll storage poll = polls[pollId];
+        uint[] memory results = new uint[](poll.options.length);
+        for (uint i = 0; i < poll.options.length; i++) {
+            results[i] = voteCounts[pollId][poll.options[i]];
+        }
+        return results;
+    }
+
+    function isPollOpen(uint pollId) public view returns (bool) {
+        require(pollId < polls.length, "Poll does not exist");
+        return block.timestamp < polls[pollId].deadline;
+    }
+
+    // Helper function to check if user needs to approve tokens for voting
+    function needsTokenApproval(address user) public view returns (bool) {
+        return votingToken.allowance(user, address(this)) < 1 * 10**18;
+    }
+
+    // Function to get required approval amount
+    function getRequiredApproval() public pure returns (uint256) {
+        return 1 * 10**18; // 1 VT token
     }
 }
