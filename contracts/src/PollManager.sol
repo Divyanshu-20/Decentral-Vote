@@ -96,6 +96,23 @@ contract PollManager is Ownable {
         votingToken.burnFrom(msg.sender, 1 * 10**18);
     }
 
+    // Gas-optimized version using option index instead of string comparison
+    function voteByIndex(uint pollId, uint optionIndex) public {
+        require(pollId < polls.length, "Poll does not exist");
+        Poll storage poll = polls[pollId];
+
+        require(block.timestamp < poll.deadline, "Poll is closed");
+        require(!hasVoted[pollId][msg.sender], "Already voted");
+        require(votingToken.balanceOf(msg.sender) > 0, "No tokens to vote");
+        require(optionIndex < poll.options.length, "Invalid option index");
+
+        hasVoted[pollId][msg.sender] = true;
+        voteCounts[pollId][poll.options[optionIndex]] += 1;
+        
+        emit VoteCast(pollId, msg.sender, poll.options[optionIndex]);
+        votingToken.burnFrom(msg.sender, 1 * 10**18);
+    }
+
     function mintAndVote(uint pollId, string memory choice) public {
         // Mint if user hasn't minted for this specific poll
         if (!hasMintedForPoll[pollId][msg.sender]) {
@@ -104,6 +121,16 @@ contract PollManager is Ownable {
         
         // Then vote
         vote(pollId, choice);
+    }
+
+    function mintAndVoteByIndex(uint pollId, uint optionIndex) public {
+        // Mint if user hasn't minted for this specific poll
+        if (!hasMintedForPoll[pollId][msg.sender]) {
+            mintTokenForPoll(pollId);
+        }
+        
+        // Then vote
+        voteByIndex(pollId, optionIndex);
     }
 
     function getTotalPolls() public view returns (uint) {

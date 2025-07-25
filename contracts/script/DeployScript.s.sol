@@ -25,8 +25,14 @@ contract DeployScript is Script {
         // Deploy VotingToken with an initial supply of 1000 tokens
         VotingToken votingToken = new VotingToken(1000 * 10 ** 18);
 
-        // Deploy PollManager and set the VotingToken address
+        // Deploy PollManager
         PollManager pollManager = new PollManager();
+        
+        // Transfer ownership of VotingToken to PollManager
+        // This allows PollManager to mint tokens for polls
+        votingToken.transferOwnership(address(pollManager));
+        
+        // Set the VotingToken address in PollManager
         pollManager.setVotingToken(address(votingToken));
 
         return (votingToken, pollManager);
