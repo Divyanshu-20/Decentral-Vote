@@ -5,14 +5,29 @@ import "forge-std/Test.sol";
 import "../src/PollManager.sol";
 import "../src/VotingToken.sol";
 
-
+/**
+ * @title PollManagerTest
+ * @dev Test suite for PollManager contract using only option index voting
+ */
 contract PollManagerTest is Test {
+    /*//////////////////////////////////////////////////////////////
+                            STATE VARIABLES
+    //////////////////////////////////////////////////////////////*/
 
     PollManager pollManager;
     VotingToken votingToken;
 
+    /*//////////////////////////////////////////////////////////////
+                                EVENTS
+    //////////////////////////////////////////////////////////////*/
+
     event PollCreated(uint indexed pollId, string title, uint256 deadline);
     event TokenMinted(uint indexed pollId, address indexed user, uint256 amount);
+    event VoteCast(uint indexed pollId, address indexed voter, string choice);
+
+    /*//////////////////////////////////////////////////////////////
+                                SETUP
+    //////////////////////////////////////////////////////////////*/
 
     function setUp() public {
         // Deploy VotingToken with an initial supply of 1000 tokens
@@ -22,14 +37,17 @@ contract PollManagerTest is Test {
         pollManager = new PollManager();
         
         // Transfer ownership of the VotingToken to the PollManager contract
-        // This is needed because only the owner can mint tokens (TEST CONTRACT TO POLLMANAGER)
         votingToken.transferOwnership(address(pollManager));
         
         // Set the VotingToken address in PollManager
         pollManager.setVotingToken(address(votingToken));
     }
 
-    function testIfPollCreationEmitsEvent() public {
+    /*//////////////////////////////////////////////////////////////
+                            POLL CREATION TESTS
+    //////////////////////////////////////////////////////////////*/
+
+    function testPollCreationEmitsEvent() public {
         string[] memory options = new string[](2);
         options[0] = "yes";
         options[1] = "no";
@@ -39,128 +57,92 @@ contract PollManagerTest is Test {
         emit PollCreated(0, "Do you like swimming?", block.timestamp + duration);
 
         pollManager.createPoll("Do you like swimming?", options, duration);
-    }   
-
-    function testIfMintTokenForPollEmitsEvent() public {
-        string[] memory options = new string[](2);
-        options[0] = "yes";
-        options[1] = "no";
-        uint256 duration = 3600;
-
-        pollManager.createPoll("Do you like swimming?", options, duration);
-
-        // The test contract is the one calling mintTokenForPoll, so we expect the TokenMinted event
-        // to be emitted with the test contract's address as the user
-        vm.expectEmit(true, true, false, true);
-        emit TokenMinted(0, address(this), 1 * 10 ** 18);
-
-        // This will emit the TokenMinted event with msg.sender as the test contract's address
-        pollManager.mintTokenForPoll(0); //mintTokenForPoll calls votingToken that's we need pollmanager to be owner
     }
 
-    function testIfTokenBurnsAfterVoting() public {
+    function testGetTotalPolls() public {
+        assertEq(pollManager.getTotalPolls(), 0);
+
         string[] memory options = new string[](2);
-        options[0] = "yes";
-        options[1] = "no";
-        uint256 duration = 3600;
+        options[0] = "Option A";
+        options[1] = "Option B";
 
-        pollManager.createPoll("Do you like swimming?", options, duration);
+        pollManager.createPoll("Test Poll 1", options, 3600);
+        assertEq(pollManager.getTotalPolls(), 1);
 
-        uint256 initialBalance = votingToken.balanceOf(address(this));
-
-        pollManager.mintTokenForPoll(0);
-
-        // Approve PollManager to burn tokens on behalf of this test contract
-        votingToken.approve(address(pollManager), 1 * 10 ** 18);
-
-        pollManager.vote(0, "yes");
-
-        // After minting and then burning 1 VT, the balance should return to the initial balance
-        assertEq(votingToken.balanceOf(address(this)), initialBalance);
-    } 
-
-    function testIfWinnerIsCorrect() public {
-        string[] memory options = new string[](2);
-        options[0] = "yes";
-        options[1] = "no";
-        uint256 duration = 3600;
-
-        pollManager.createPoll("Do you like swimming?", options, duration);
-
-        // Create multiple voters using vm.prank to simulate different addresses
-        address voter1 = address(0x1);
-        address voter2 = address(0x2);
-        address voter3 = address(0x3);
-
-        // Voter 1 votes "yes"
-        vm.startPrank(voter1);
-        pollManager.mintTokenForPoll(0);
-        votingToken.approve(address(pollManager), 1 * 10 ** 18);
-        pollManager.vote(0, "yes");
-        vm.stopPrank();
-
-        // Voter 2 votes "yes" 
-        vm.startPrank(voter2);
-        pollManager.mintTokenForPoll(0);
-        votingToken.approve(address(pollManager), 1 * 10 ** 18);
-        pollManager.vote(0, "yes");
-        vm.stopPrank();
-
-        // Voter 3 votes "no"
-        vm.startPrank(voter3);
-        pollManager.mintTokenForPoll(0);
-        votingToken.approve(address(pollManager), 1 * 10 ** 18);
-        pollManager.vote(0, "no");
-        vm.stopPrank();
-
-        // Check the winner - "yes" should win with 2 votes vs "no" with 1 vote
-        string memory winner = pollManager.getWinnerOption(0);
-        assertEq(winner, "yes");
-
-        // Also verify the vote counts
-        uint[] memory results = pollManager.pollResults(0);
-        assertEq(results[0], 2); // "yes" should have 2 votes
-        assertEq(results[1], 1); // "no" should have 1 vote
+        pollManager.createPoll("Test Poll 2", options, 3600);
+        assertEq(pollManager.getTotalPolls(), 2);
     }
 
-    function testIfPollIsOpen() public {
-        string[] memory options = new string[](2);
-        options[0] = "yes";
-        options[1] = "no";
-        uint256 duration = 3600; // 1 hour
+    function testPollDetails() public {
+        string[] memory options = new string[](3);
+        options[0] = "Alice";
+        options[1] = "Bob";
+        options[2] = "Charlie";
+        uint256 duration = 3600;
 
-        pollManager.createPoll("Do you like swimming?", options, duration);
+        pollManager.createPoll("Best Developer", options, duration);
 
-        // Test that poll is open initially
-        assertTrue(pollManager.isPollOpen(0));
+        (string memory title, string[] memory returnedOptions, uint256 deadline) = pollManager.pollDetails(0);
         
-        // Fast forward time by 30 minutes (poll should still be open)
-        vm.warp(block.timestamp + 1800); // 1800 seconds = 30 minutes
-        assertTrue(pollManager.isPollOpen(0));
-        
-        // Fast forward time by another 45 minutes (total 75 minutes, past deadline)
-        vm.warp(block.timestamp + 2700); // 2700 seconds = 45 minutes
-        assertFalse(pollManager.isPollOpen(0));
-    }
-
-    function testIfPollDetailsAreAvailable() public {
-        string[] memory options = new string[](2);
-        options[0] = "yes";
-        options[1] = "no";
-        uint256 duration = 3600; // 1 hour
-
-        pollManager.createPoll("Do you like swimming?", options, duration);
-
-        (string memory title, string[] memory options_, uint256 deadline) = pollManager.pollDetails(0);
-        assertEq(title, "Do you like swimming?");
-        assertEq(options_.length, 2);
-        assertEq(options_[0], "yes");
-        assertEq(options_[1], "no");
+        assertEq(title, "Best Developer");
+        assertEq(returnedOptions.length, 3);
+        assertEq(returnedOptions[0], "Alice");
+        assertEq(returnedOptions[1], "Bob");
+        assertEq(returnedOptions[2], "Charlie");
         assertEq(deadline, block.timestamp + duration);
     }
 
-    // Test gas-optimized voteByIndex function
-    function testVoteByIndex() public {
+    /*//////////////////////////////////////////////////////////////
+                            TOKEN MINTING TESTS
+    //////////////////////////////////////////////////////////////*/
+
+    function testMintTokenForPollEmitsEvent() public {
+        string[] memory options = new string[](2);
+        options[0] = "yes";
+        options[1] = "no";
+        uint256 duration = 3600;
+
+        pollManager.createPoll("Do you like swimming?", options, duration);
+
+        vm.expectEmit(true, true, false, true);
+        emit TokenMinted(0, address(this), 1 * 10 ** 18);
+
+        pollManager.mintTokenForPoll(0);
+    }
+
+    function testCannotMintTwiceForSamePoll() public {
+        string[] memory options = new string[](2);
+        options[0] = "yes";
+        options[1] = "no";
+
+        pollManager.createPoll("Test Poll", options, 3600);
+        
+        pollManager.mintTokenForPoll(0);
+        
+        vm.expectRevert("Already minted for this poll");
+        pollManager.mintTokenForPoll(0);
+    }
+
+    function testCannotMintForClosedPoll() public {
+        string[] memory options = new string[](2);
+        options[0] = "yes";
+        options[1] = "no";
+        uint256 duration = 1; // 1 second
+
+        pollManager.createPoll("Test Poll", options, duration);
+        
+        // Fast forward past deadline
+        vm.warp(block.timestamp + 2);
+        
+        vm.expectRevert("Poll is closed");
+        pollManager.mintTokenForPoll(0);
+    }
+
+    /*//////////////////////////////////////////////////////////////
+                             VOTING TESTS
+    //////////////////////////////////////////////////////////////*/
+
+    function testVoteByIndexBasic() public {
         string[] memory options = new string[](3);
         options[0] = "Option A";
         options[1] = "Option B";
@@ -169,48 +151,129 @@ contract PollManagerTest is Test {
 
         pollManager.createPoll("Test Poll", options, duration);
 
-        // Test voting by index
         pollManager.mintTokenForPoll(0);
         votingToken.approve(address(pollManager), 1 * 10 ** 18);
         
         // Vote for option at index 1 ("Option B")
-        pollManager.voteByIndex(0, 1);
+        pollManager.vote(0, 1);
 
         // Verify the vote was recorded correctly
         uint[] memory results = pollManager.pollResults(0);
         assertEq(results[0], 0); // "Option A" should have 0 votes
         assertEq(results[1], 1); // "Option B" should have 1 vote
         assertEq(results[2], 0); // "Option C" should have 0 votes
+
+        // Verify user is marked as voted
+        assertTrue(pollManager.hasVoted(0, address(this)));
     }
 
-    function testVoteByIndexWithInvalidIndex() public {
+    function testVoteByIndexEmitsEvent() public {
         string[] memory options = new string[](2);
         options[0] = "yes";
         options[1] = "no";
-        uint256 duration = 3600;
+
+        pollManager.createPoll("Test Poll", options, 3600);
+        pollManager.mintTokenForPoll(0);
+        votingToken.approve(address(pollManager), 1 * 10 ** 18);
+
+        vm.expectEmit(true, true, false, true);
+        emit VoteCast(0, address(this), "yes");
+
+        pollManager.vote(0, 0); // Vote for "yes" (index 0)
+    }
+
+    function testCannotVoteWithInvalidIndex() public {
+        string[] memory options = new string[](2);
+        options[0] = "yes";
+        options[1] = "no";
+
+        pollManager.createPoll("Test Poll", options, 3600);
+        pollManager.mintTokenForPoll(0);
+        votingToken.approve(address(pollManager), 1 * 10 ** 18);
+
+        vm.expectRevert("Invalid option index");
+        pollManager.vote(0, 2); // Index 2 doesn't exist
+    }
+
+    function testCannotVoteTwice() public {
+        string[] memory options = new string[](2);
+        options[0] = "yes";
+        options[1] = "no";
+
+        pollManager.createPoll("Test Poll", options, 3600);
+        pollManager.mintTokenForPoll(0);
+        votingToken.approve(address(pollManager), 1 * 10 ** 18);
+
+        pollManager.vote(0, 0);
+
+        // Try to vote again
+        vm.expectRevert("Already voted");
+        pollManager.vote(0, 1);
+    }
+
+    function testCannotVoteWithoutTokens() public {
+        string[] memory options = new string[](2);
+        options[0] = "yes";
+        options[1] = "no";
+
+        pollManager.createPoll("Test Poll", options, 3600);
+
+        // Try to vote without having any tokens
+        // This will fail because burnFrom requires sufficient allowance and balance
+        vm.expectRevert();
+        pollManager.vote(0, 0);
+    }
+
+    function testCannotVoteOnClosedPoll() public {
+        string[] memory options = new string[](2);
+        options[0] = "yes";
+        options[1] = "no";
+        uint256 duration = 1; // 1 second
 
         pollManager.createPoll("Test Poll", options, duration);
         pollManager.mintTokenForPoll(0);
         votingToken.approve(address(pollManager), 1 * 10 ** 18);
 
-        // Try to vote with invalid index (should revert)
-        vm.expectRevert("Invalid option index");
-        pollManager.voteByIndex(0, 2); // Index 2 doesn't exist (only 0 and 1)
+        // Fast forward past deadline
+        vm.warp(block.timestamp + 2);
+
+        vm.expectRevert("Poll is closed");
+        pollManager.vote(0, 0);
     }
 
-    function testMintAndVoteByIndex() public {
+    function testTokenBurnsAfterVoting() public {
         string[] memory options = new string[](2);
         options[0] = "yes";
         options[1] = "no";
-        uint256 duration = 3600;
 
-        pollManager.createPoll("Test Poll", options, duration);
+        pollManager.createPoll("Test Poll", options, 3600);
 
         uint256 initialBalance = votingToken.balanceOf(address(this));
 
-        // Use mintAndVoteByIndex - should mint token and vote in one transaction
+        pollManager.mintTokenForPoll(0);
         votingToken.approve(address(pollManager), 1 * 10 ** 18);
-        pollManager.mintAndVoteByIndex(0, 0); // Vote for "yes" (index 0)
+        pollManager.vote(0, 0);
+
+        // After minting and then burning 1 VT, balance should return to initial
+        assertEq(votingToken.balanceOf(address(this)), initialBalance);
+    }
+
+    /*//////////////////////////////////////////////////////////////
+                        MINT AND VOTE TESTS
+    //////////////////////////////////////////////////////////////*/
+
+    function testMintAndVote() public {
+        string[] memory options = new string[](2);
+        options[0] = "yes";
+        options[1] = "no";
+
+        pollManager.createPoll("Test Poll", options, 3600);
+
+        uint256 initialBalance = votingToken.balanceOf(address(this));
+
+        // Use mintAndVote - should mint token and vote in one transaction
+        votingToken.approve(address(pollManager), 1 * 10 ** 18);
+        pollManager.mintAndVote(0, 0); // Vote for "yes" (index 0)
 
         // Check that vote was recorded
         uint[] memory results = pollManager.pollResults(0);
@@ -220,60 +283,83 @@ contract PollManagerTest is Test {
         // Check that token was minted and then burned (balance back to initial)
         assertEq(votingToken.balanceOf(address(this)), initialBalance);
 
-        // Check that user is marked as voted
+        // Check that user is marked as voted and minted
         assertTrue(pollManager.hasVoted(0, address(this)));
+        assertTrue(pollManager.hasMintedForPoll(0, address(this)));
     }
 
-    function testGasEfficiencyComparison() public {
-        string[] memory options = new string[](4);
-        options[0] = "Very Long Option Name A";
-        options[1] = "Very Long Option Name B";
-        options[2] = "Very Long Option Name C";
-        options[3] = "Very Long Option Name D";
-        uint256 duration = 3600;
+    function testMintAndVoteWhenAlreadyMinted() public {
+        string[] memory options = new string[](2);
+        options[0] = "yes";
+        options[1] = "no";
 
-        pollManager.createPoll("Gas Test Poll", options, duration);
+        pollManager.createPoll("Test Poll", options, 3600);
 
-        // Test string-based voting (original method)
-        address voter1 = address(0x1);
-        vm.startPrank(voter1);
+        // First mint manually
         pollManager.mintTokenForPoll(0);
-        votingToken.approve(address(pollManager), 1 * 10 ** 18);
         
-        uint256 gasBefore = gasleft();
-        pollManager.vote(0, "Very Long Option Name D"); // Vote for last option (worst case)
-        uint256 gasUsedString = gasBefore - gasleft();
-        vm.stopPrank();
-
-        // Test index-based voting (optimized method)
-        address voter2 = address(0x2);
-        vm.startPrank(voter2);
-        pollManager.mintTokenForPoll(0);
+        // Then use mintAndVote - should not mint again, just vote
         votingToken.approve(address(pollManager), 1 * 10 ** 18);
-        
-        gasBefore = gasleft();
-        pollManager.voteByIndex(0, 3); // Vote for same option by index
-        uint256 gasUsedIndex = gasBefore - gasleft();
-        vm.stopPrank();
+        pollManager.mintAndVote(0, 1);
 
-        // Index-based voting should use less gas
-        assertLt(gasUsedIndex, gasUsedString, "Index voting should be more gas efficient");
-
-        // Both votes should be recorded correctly
+        // Verify vote was recorded
         uint[] memory results = pollManager.pollResults(0);
-        assertEq(results[3], 2); // Both votes for option D
+        assertEq(results[1], 1); // "no" should have 1 vote
     }
 
-    function testWinnerWithIndexVoting() public {
+    /*//////////////////////////////////////////////////////////////
+                            POLL STATUS TESTS
+    //////////////////////////////////////////////////////////////*/
+
+    function testIsPollOpen() public {
+        string[] memory options = new string[](2);
+        options[0] = "yes";
+        options[1] = "no";
+        uint256 duration = 3600; // 1 hour
+
+        pollManager.createPoll("Test Poll", options, duration);
+
+        // Test that poll is open initially
+        assertTrue(pollManager.isPollOpen(0));
+        
+        // Fast forward time by 30 minutes (poll should still be open)
+        vm.warp(block.timestamp + 1800);
+        assertTrue(pollManager.isPollOpen(0));
+        
+        // Fast forward time past deadline
+        vm.warp(block.timestamp + 2700);
+        assertFalse(pollManager.isPollOpen(0));
+    }
+
+    /*//////////////////////////////////////////////////////////////
+                            WINNER TESTS
+    //////////////////////////////////////////////////////////////*/
+
+    function testGetWinnerOptionSingleVote() public {
         string[] memory options = new string[](3);
         options[0] = "Alice";
         options[1] = "Bob";
         options[2] = "Charlie";
-        uint256 duration = 3600;
 
-        pollManager.createPoll("Best Developer", options, duration);
+        pollManager.createPoll("Best Developer", options, 3600);
 
-        // Multiple voters using index-based voting
+        pollManager.mintTokenForPoll(0);
+        votingToken.approve(address(pollManager), 1 * 10 ** 18);
+        pollManager.vote(0, 1); // Vote for Bob
+
+        string memory winner = pollManager.getWinnerOption(0);
+        assertEq(winner, "Bob");
+    }
+
+    function testGetWinnerOptionMultipleVotes() public {
+        string[] memory options = new string[](3);
+        options[0] = "Alice";
+        options[1] = "Bob";
+        options[2] = "Charlie";
+
+        pollManager.createPoll("Best Developer", options, 3600);
+
+        // Create multiple voters
         address voter1 = address(0x1);
         address voter2 = address(0x2);
         address voter3 = address(0x3);
@@ -283,39 +369,124 @@ contract PollManagerTest is Test {
         vm.startPrank(voter1);
         pollManager.mintTokenForPoll(0);
         votingToken.approve(address(pollManager), 1 * 10 ** 18);
-        pollManager.voteByIndex(0, 0);
+        pollManager.vote(0, 0);
         vm.stopPrank();
 
         // Voter 2 votes for Bob (index 1)
         vm.startPrank(voter2);
         pollManager.mintTokenForPoll(0);
         votingToken.approve(address(pollManager), 1 * 10 ** 18);
-        pollManager.voteByIndex(0, 1);
+        pollManager.vote(0, 1);
         vm.stopPrank();
 
         // Voter 3 votes for Bob (index 1)
         vm.startPrank(voter3);
         pollManager.mintTokenForPoll(0);
         votingToken.approve(address(pollManager), 1 * 10 ** 18);
-        pollManager.voteByIndex(0, 1);
+        pollManager.vote(0, 1);
         vm.stopPrank();
 
         // Voter 4 votes for Alice (index 0)
         vm.startPrank(voter4);
         pollManager.mintTokenForPoll(0);
         votingToken.approve(address(pollManager), 1 * 10 ** 18);
-        pollManager.voteByIndex(0, 0);
+        pollManager.vote(0, 0);
         vm.stopPrank();
 
-        // Check results: Alice=2, Bob=2, Charlie=0 (tie between Alice and Bob)
+        // Check results: Alice=2, Bob=2, Charlie=0
         uint[] memory results = pollManager.pollResults(0);
         assertEq(results[0], 2); // Alice
         assertEq(results[1], 2); // Bob
         assertEq(results[2], 0); // Charlie
 
-        // Winner should be Alice (first option with max votes in case of tie)
+        // In case of tie, should return first option with max votes (Alice)
         string memory winner = pollManager.getWinnerOption(0);
         assertEq(winner, "Alice");
     }
-    
+
+    function testGetWinnerOptionClearWinner() public {
+        string[] memory options = new string[](3);
+        options[0] = "Alice";
+        options[1] = "Bob";
+        options[2] = "Charlie";
+
+        pollManager.createPoll("Best Developer", options, 3600);
+
+        // Create voters with Bob getting most votes
+        address voter1 = address(0x1);
+        address voter2 = address(0x2);
+        address voter3 = address(0x3);
+
+        // Alice gets 1 vote
+        vm.startPrank(voter1);
+        pollManager.mintTokenForPoll(0);
+        votingToken.approve(address(pollManager), 1 * 10 ** 18);
+        pollManager.vote(0, 0);
+        vm.stopPrank();
+
+        // Bob gets 2 votes
+        vm.startPrank(voter2);
+        pollManager.mintTokenForPoll(0);
+        votingToken.approve(address(pollManager), 1 * 10 ** 18);
+        pollManager.vote(0, 1);
+        vm.stopPrank();
+
+        vm.startPrank(voter3);
+        pollManager.mintTokenForPoll(0);
+        votingToken.approve(address(pollManager), 1 * 10 ** 18);
+        pollManager.vote(0, 1);
+        vm.stopPrank();
+
+        string memory winner = pollManager.getWinnerOption(0);
+        assertEq(winner, "Bob");
+    }
+
+    /*//////////////////////////////////////////////////////////////
+                            UTILITY TESTS
+    //////////////////////////////////////////////////////////////*/
+
+    function testNeedsTokenApproval() public {
+        assertTrue(pollManager.needsTokenApproval(address(this)));
+        
+        votingToken.approve(address(pollManager), 1 * 10 ** 18);
+        assertFalse(pollManager.needsTokenApproval(address(this)));
+    }
+
+    function testGetRequiredApproval() public view {
+        assertEq(pollManager.getRequiredApproval(), 1 * 10 ** 18);
+    }
+
+    /*//////////////////////////////////////////////////////////////
+                            ERROR TESTS
+    //////////////////////////////////////////////////////////////*/
+
+    function testCannotGetDetailsOfNonexistentPoll() public {
+        vm.expectRevert("Poll does not exist");
+        pollManager.pollDetails(0);
+    }
+
+    function testCannotGetResultsOfNonexistentPoll() public {
+        vm.expectRevert("Poll does not exist");
+        pollManager.pollResults(0);
+    }
+
+    function testCannotGetWinnerOfNonexistentPoll() public {
+        vm.expectRevert("Poll does not exist");
+        pollManager.getWinnerOption(0);
+    }
+
+    function testCannotCheckIfNonexistentPollIsOpen() public {
+        vm.expectRevert("Poll does not exist");
+        pollManager.isPollOpen(0);
+    }
+
+    function testCannotMintForNonexistentPoll() public {
+        vm.expectRevert("Poll does not exist");
+        pollManager.mintTokenForPoll(0);
+    }
+
+    function testCannotVoteOnNonexistentPoll() public {
+        vm.expectRevert("Poll does not exist");
+        pollManager.vote(0, 0);
+    }
 }

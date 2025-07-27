@@ -14,13 +14,13 @@ export default function Home() {
               </div>
               <div>
                 <h1 className="text-xl font-bold text-white">
-                  VoteChain
+                  DecentralVote
                 </h1>
                 <p className="text-gray-400 text-xs">Decentralized Voting Platform</p>
               </div>
             </div>
             
-            <div className="bg-black border border-white rounded-xl p-1">
+            <div>
               <ConnectButton />
             </div>
           </div>

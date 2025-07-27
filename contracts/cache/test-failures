@@ -1,1 +1,1 @@
-testWinnerWithIndexVoting
+testCannotVoteWithoutTokens|testMintAndVote|testMintAndVoteWhenAlreadyMinted
