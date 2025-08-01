@@ -239,7 +239,7 @@ export default function PollManager() {
                   No poll exists with ID {pollId}. Please check the poll ID and try again.
                 </p>
               </div>
-            )}
+            )}      
           </div>
         )}
       </div>
